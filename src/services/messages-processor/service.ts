@@ -66,7 +66,7 @@ export const makeMessagesProcessor = ({
 
     logger.info(`Loading messages from '${config.MESSAGES_LOCATION}' folder`)
 
-    const folder = await readFolder(config.MESSAGES_LOCATION)
+    const folder =  await readFolder(config.MESSAGES_LOCATION)
 
     const messagesWithMetadata: ExitMessageWithMetadata[] = []
 

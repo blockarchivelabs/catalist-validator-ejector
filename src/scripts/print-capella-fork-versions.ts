@@ -15,12 +15,14 @@ export enum Chains {
   MAINNET = 1,
   GOERLI = 5,
   HOLESKY = 17000,
+  ENDURANCE_MAINNET = 648
 }
 
 const networks = new Map([
   [Chains.MAINNET, { name: 'mainnet', CAPELLA_FORK_VERSION: '' }],
   [Chains.GOERLI, { name: 'goerli', CAPELLA_FORK_VERSION: '' }],
   [Chains.HOLESKY, { name: 'holesky', CAPELLA_FORK_VERSION: '' }],
+  [Chains.ENDURANCE_MAINNET, { name: 'endurance', CAPELLA_FORK_VERSION: '' }],
 ])
 
 const makeCLNodesConfig = (env: NodeJS.ProcessEnv) => {
