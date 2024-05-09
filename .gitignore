@@ -2,6 +2,9 @@ node_modules
 .DS_Store
 .env
 /messages
+/keystore
+/temp
+/ethdo
 dist
 .jest
 
