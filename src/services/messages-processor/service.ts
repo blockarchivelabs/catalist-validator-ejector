@@ -1,14 +1,16 @@
 import bls from '@chainsafe/bls'
-import { decrypt } from '@chainsafe/bls-keystore'
+import { decrypt, create } from '@chainsafe/bls-keystore'
 import { createHash } from 'crypto'
 
 import { ssz } from '@lodestar/types'
 import { fromHex, toHexString } from '@lodestar/utils'
 import { DOMAIN_VOLUNTARY_EXIT } from '@lodestar/params'
 import { computeDomain, computeSigningRoot } from '@lodestar/state-transition'
-
+import { promises as fs } from 'fs'
+import { argv, question, $, glob } from 'zx'
+import { readdir, readFile, writeFile } from 'fs/promises'
+import { utils } from 'ethers'
 import { encryptedMessageDTO, exitOrEthDoExitDTO } from './dto.js'
-
 import type { LoggerService } from 'lido-nanolib'
 import type {
   LocalFileReaderService,
@@ -66,7 +68,7 @@ export const makeMessagesProcessor = ({
 
     logger.info(`Loading messages from '${config.MESSAGES_LOCATION}' folder`)
 
-    const folder =  await readFolder(config.MESSAGES_LOCATION)
+    const folder = await readFolder(config.MESSAGES_LOCATION)
 
     const messagesWithMetadata: ExitMessageWithMetadata[] = []
 
@@ -267,6 +269,12 @@ export const makeMessagesProcessor = ({
     return validMessagesWithMetadata
   }
 
+  const readFolder = async (uri: string): Promise<MessageFile[]> => {
+    if (uri.startsWith('s3://')) return s3Service.read(uri)
+    if (uri.startsWith('gs://')) return gsService.read(uri)
+    return localFileReader.readFilesFromFolder(uri)
+  }
+
   const exit = async (
     messageStorage: MessageStorage,
     event: { validatorPubkey: string; validatorIndex: string }
@@ -278,6 +286,13 @@ export const makeMessagesProcessor = ({
         'Validator needs to be exited but required message was not found / accessible!'
       )
       metrics.exitActions.inc({ result: 'error' })
+
+      try {
+        await createExitSignedMessage(event.validatorPubkey)
+      } catch (e) {
+        logger.error('[Message Create] Exception', e)
+      }
+
       return
     }
 
@@ -297,10 +312,94 @@ export const makeMessagesProcessor = ({
     }
   }
 
-  const readFolder = async (uri: string): Promise<MessageFile[]> => {
-    if (uri.startsWith('s3://')) return s3Service.read(uri)
-    if (uri.startsWith('gs://')) return gsService.read(uri)
-    return localFileReader.readFilesFromFolder(uri)
+  const createExitSignedMessage = async (validatorPubkey: string) => {
+    const folder = await readFolder('keystore')
+    let keystoreFileName: string | null = null
+
+    for (const [ix, keystoreFile] of folder.entries()) {
+      let json: Record<string, unknown>
+      try {
+        json = JSON.parse(keystoreFile.content)
+        if ('0x' + json.pubkey === validatorPubkey) {
+          keystoreFileName = keystoreFile.filename
+          break
+        }
+      } catch (error) {
+        logger.warn(`Unparseable JSON in file ${keystoreFile.filename}`, error)
+        continue
+      }
+    }
+
+    if (keystoreFileName) {
+      try {
+        const ETHDO_PATH = process.env.ETHDO_PATH
+
+        if (!process.env.KEYSTORE_PASSWARD) {
+          console.error('Please set encryption password in .env')
+          return
+        }
+
+        if (!process.env.MESSAGES_PASSWORD) {
+          console.error('Please set massage password in .env')
+          return
+        }
+
+        if (!process.env.CONSENSUS_NODE) {
+          console.error('Please set node url in .env')
+          return
+        }
+
+        logger.info(
+          `[Message Create] Fetching network state (create offline-preparation.json)`
+        )
+        await $`${ETHDO_PATH} validator exit --prepare-offline --connection=${process.env.CONSENSUS_NODE} --timeout=300s --verbose --debug`
+        logger.info(`[Message Create] Network state fetched`)
+
+        logger.info('[Message Create] Doing', validatorPubkey)
+
+        // Importing keystore to ethdo
+        await $`${ETHDO_PATH} --base-dir=./temp wallet create --wallet=wallet`
+        await $`${ETHDO_PATH} --base-dir=./temp account import --account=wallet/account --keystore="keystore/${keystoreFileName}" --keystore-passphrase="${process.env.KEYSTORE_PASSWARD}" --passphrase=pass --allow-weak-passphrases`
+
+        // Generating an exit message, catching command output and writing to file
+        const output =
+          await $`${ETHDO_PATH} --base-dir=./temp validator exit --account=wallet/account --passphrase=pass --json --verbose --debug --offline`
+        await fs.writeFile(`temp/${validatorPubkey}.json`, output.stdout)
+
+        // Cleaning up
+        await $`${ETHDO_PATH} --base-dir=./temp wallet delete --wallet=wallet`
+        logger.info('[Message Create] Done with', validatorPubkey)
+
+        await $`rm offline-preparation.json`
+
+        const original = (
+          await readFile(`temp/${validatorPubkey}.json`)
+        ).toString()
+
+        const message = utils.toUtf8Bytes(original)
+        const pubkey = new Uint8Array()
+        const path = ''
+
+        const store = await create(
+          process.env.MESSAGES_PASSWORD,
+          message,
+          pubkey,
+          path
+        )
+
+        await writeFile(
+          `${process.env.MESSAGES_LOCATION}/${validatorPubkey}.json`,
+          JSON.stringify(store)
+        )
+      } catch (e) {
+        const ETHDO_PATH = process.env.ETHDO_PATH
+        try {
+          await $`${ETHDO_PATH} --base-dir=./temp wallet delete --wallet=wallet`
+          await $`rm offline-preparation.json`
+        } catch (e) {}
+        logger.error('[Message Create] Exception', e)
+      }
+    }
   }
 
   const loadToMemoryStorage = async (
@@ -344,5 +443,5 @@ export const makeMessagesProcessor = ({
     return { ...stats, removed, invalidExitMessageFiles }
   }
 
-  return { exit, loadToMemoryStorage }
+  return { exit, loadToMemoryStorage, createExitSignedMessage }
 }

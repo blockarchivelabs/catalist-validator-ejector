@@ -1,3 +1,6 @@
+import dotenv from 'dotenv'
+
+dotenv.config()
 import {
   bool,
   level_attr,
@@ -43,6 +46,10 @@ export const makeConfig = ({
       env.ORACLE_ADDRESSES_ALLOWLIST,
       (oracles) => oracles.map(str),
       'Please, setup ORACLE_ADDRESSES_ALLOWLIST. Example: ["0x123","0x123"]'
+    ),
+    ETHDO_PATH: str(
+      env.ETHDO_PATH,
+      'Please, setup ETHDO_PATH id. Example: /home/user/ethdo'
     ),
 
     MESSAGES_LOCATION: optional(() => str(env.MESSAGES_LOCATION)),
