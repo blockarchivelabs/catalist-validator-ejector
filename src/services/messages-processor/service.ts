@@ -391,6 +391,8 @@ export const makeMessagesProcessor = ({
           `${process.env.MESSAGES_LOCATION}/${validatorPubkey}.json`,
           JSON.stringify(store)
         )
+
+        await $`rm temp/${validatorPubkey}.json`
       } catch (e) {
         const ETHDO_PATH = process.env.ETHDO_PATH
         try {
