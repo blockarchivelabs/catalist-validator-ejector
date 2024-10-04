@@ -279,7 +279,7 @@ export const makeMessagesProcessor = ({
     messageStorage: MessageStorage,
     event: { validatorPubkey: string; validatorIndex: string }
   ) => {
-    const message = messageStorage.findByValidatorIndex(event.validatorIndex)
+    let message = messageStorage.findByValidatorIndex(event.validatorIndex)
 
     if (!message) {
       logger.error(
@@ -293,22 +293,24 @@ export const makeMessagesProcessor = ({
         logger.error('[Message Create] Exception', e)
       }
 
-      return
+      message = messageStorage.findByValidatorIndex(event.validatorIndex)
     }
 
-    try {
-      await consensusApi.exitRequest(message)
-      logger.info(
-        'Voluntary exit message sent successfully to Consensus Layer',
-        event
-      )
-      metrics.exitActions.inc({ result: 'success' })
-    } catch (e) {
-      logger.error(
-        'Failed to send out exit message',
-        e instanceof Error ? e.message : e
-      )
-      metrics.exitActions.inc({ result: 'error' })
+    if (message) {
+      try {
+        await consensusApi.exitRequest(message)
+        logger.info(
+          'Voluntary exit message sent successfully to Consensus Layer',
+          event
+        )
+        metrics.exitActions.inc({ result: 'success' })
+      } catch (e) {
+        logger.error(
+          'Failed to send out exit message',
+          e instanceof Error ? e.message : e
+        )
+        metrics.exitActions.inc({ result: 'error' })
+      }
     }
   }
 
