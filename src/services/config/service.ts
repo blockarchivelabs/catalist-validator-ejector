@@ -13,7 +13,29 @@ import {
 } from 'lido-nanolib'
 import { readFileSync } from 'fs'
 
-export type ConfigService = ReturnType<typeof makeConfig>
+export interface ConfigService {
+  EXECUTION_NODE: string
+  CONSENSUS_NODE: string
+  LOCATOR_ADDRESS: string
+  STAKING_MODULE_ID: string
+  OPERATOR_ID: string
+  ORACLE_ADDRESSES_ALLOWLIST: string[]
+  ETHDO_PATH: string
+  MESSAGES_LOCATION: string | undefined
+  VALIDATOR_EXIT_WEBHOOK: string | undefined
+  MESSAGES_PASSWORD: string | undefined
+  BLOCKS_PRELOAD: number
+  BLOCKS_LOOP: number
+  JOB_INTERVAL: number
+  HTTP_PORT: number
+  RUN_METRICS: boolean
+  RUN_HEALTH_CHECK: boolean
+  DRY_RUN: boolean
+  DISABLE_SECURITY_DONT_USE_IN_PRODUCTION: boolean
+  PROM_PREFIX: string | undefined
+  FORCE_DENCUN_FORK_MODE: boolean
+  TIMEOUT_MS: number
+}
 
 export const makeConfig = ({
   env,
@@ -59,7 +81,7 @@ export const makeConfig = ({
 
     BLOCKS_PRELOAD: optional(() => num(env.BLOCKS_PRELOAD)) ?? 50000, // 7 days of blocks
     BLOCKS_LOOP: optional(() => num(env.BLOCKS_LOOP)) ?? 900, // 3 hours of blocks
-    JOB_INTERVAL: optional(() => num(env.JOB_INTERVAL)) ?? 384000, // 1 epoch
+    JOB_INTERVAL: optional(() => num(env.JOB_INTERVAL)) ?? 1000, // 1 epoch 384000
 
     HTTP_PORT: optional(() => num(env.HTTP_PORT)) ?? 8989,
     RUN_METRICS: optional(() => bool(env.RUN_METRICS)) ?? false,
@@ -73,6 +95,8 @@ export const makeConfig = ({
 
     FORCE_DENCUN_FORK_MODE:
       optional(() => bool(env.FORCE_DENCUN_FORK_MODE)) ?? false,
+
+    TIMEOUT_MS: optional(() => num(env.TIMEOUT_MS)) ?? 10_000,
   }
 
   if (config.MESSAGES_LOCATION && config.VALIDATOR_EXIT_WEBHOOK) {

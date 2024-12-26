@@ -15,6 +15,13 @@ import {
   genericArrayOfStringsDTO,
 } from './dto.js'
 
+interface ExitMessageResponse {
+  success: boolean
+  data: {
+    exit_msg: string
+  }
+}
+
 const ORACLE_FRAME_BLOCKS = 7200
 
 export type ExecutionApiService = ReturnType<typeof makeExecutionApi>
@@ -158,93 +165,66 @@ export const makeExecutionApi = (
   }
 
   const logs = async (fromBlock: number, toBlock: number) => {
-    const event = ethers.utils.Fragment.from(
-      'event ValidatorExitRequest(uint256 indexed stakingModuleId, uint256 indexed nodeOperatorId, uint256 indexed validatorIndex, bytes validatorPubkey, uint256 timestamp)'
+    // const event = ethers.utils.Fragment.from(
+    //   'event ValidatorExitRequest(uint256 indexed stakingModuleId, uint256 indexed nodeOperatorId, uint256 indexed validatorIndex, bytes validatorPubkey, uint256 timestamp)'
+    // )
+    // const iface = new ethers.utils.Interface([event])
+    // const eventTopic = iface.getEventTopic(event.name)
+
+    // Validator API에서 exit message 가져오기
+    const exitMessageResponse = await request(
+      process.env.VALIDATOR_API + '/validator/exit-message',
+      {
+        method: 'GET',
+      }
     )
-    const iface = new ethers.utils.Interface([event])
-    const eventTopic = iface.getEventTopic(event.name)
 
-    const res = await request(normalizedUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        method: 'eth_getLogs',
-        params: [
-          {
-            fromBlock: ethers.utils.hexStripZeros(
-              ethers.BigNumber.from(fromBlock).toHexString()
-            ),
-            toBlock: ethers.utils.hexStripZeros(
-              ethers.BigNumber.from(toBlock).toHexString()
-            ),
-            address: exitBusAddress,
-            topics: [
-              eventTopic,
-              ethers.utils.hexZeroPad(
-                ethers.BigNumber.from(STAKING_MODULE_ID).toHexString(),
-                32
-              ),
-              ethers.utils.hexZeroPad(
-                ethers.BigNumber.from(OPERATOR_ID).toHexString(),
-                32
-              ),
-            ],
-          },
-        ],
-        id: 1,
-      }),
-    })
+    const exitMessageJson =
+      (await exitMessageResponse.json()) as ExitMessageResponse
 
-    const json = await res.json()
+    let validatorsToEject: any[] = []
 
-    const { result } = logsDTO(json)
-
-    logger.info('Loaded ValidatorExitRequest events', { amount: result.length })
-
-    const validatorsToEject: {
-      validatorIndex: string
-      validatorPubkey: string
-    }[] = []
-
-    logger.info('Verifying validity of exit requests')
-
-    for (const [ix, log] of result.entries()) {
-      logger.debug(`${ix + 1}/${result.length}`)
-
-      const parsedLog = iface.parseLog(log)
-
-      const { validatorIndex, validatorPubkey } = parsedLog.args as unknown as {
-        validatorIndex: ethers.BigNumber
-        validatorPubkey: string
-      }
-
-      if (!DISABLE_SECURITY_DONT_USE_IN_PRODUCTION) {
-        try {
-          await verifyEvent(
-            validatorPubkey,
-            log.transactionHash,
-            parseInt(log.blockNumber)
-          )
-          logger.debug('Event security check passed', { validatorPubkey })
-          eventSecurityVerification.inc({ result: 'success' })
-        } catch (e) {
-          logger.error(`Event security check failed for ${validatorPubkey}`, e)
-          eventSecurityVerification.inc({ result: 'error' })
-          continue
-        }
-      } else {
-        logger.warn('WARNING')
-        logger.warn('Skipping protocol exit requests security checks.')
-        logger.warn('Please double-check this is intentional.')
-        logger.warn('WARNING')
-      }
-
-      validatorsToEject.push({
-        validatorIndex: validatorIndex.toString(),
-        validatorPubkey,
-      })
+    if (exitMessageJson.success && exitMessageJson.data) {
+      validatorsToEject = [JSON.parse(exitMessageJson.data.exit_msg)]
     }
+
+    // const res = await request(normalizedUrl, {
+    //   method: 'POST',
+    //   headers: { 'Content-Type': 'application/json' },
+    //   body: JSON.stringify({
+    //     jsonrpc: '2.0',
+    //     method: 'eth_getLogs',
+    //     params: [
+    //       {
+    //         fromBlock: ethers.utils.hexStripZeros(
+    //           ethers.BigNumber.from(fromBlock).toHexString()
+    //         ),
+    //         toBlock: ethers.utils.hexStripZeros(
+    //           ethers.BigNumber.from(toBlock).toHexString()
+    //         ),
+    //         address: exitBusAddress,
+    //         topics: [
+    //           eventTopic,
+    //           ethers.utils.hexZeroPad(
+    //             ethers.BigNumber.from(STAKING_MODULE_ID).toHexString(),
+    //             32
+    //           ),
+    //           ethers.utils.hexZeroPad(
+    //             ethers.BigNumber.from(OPERATOR_ID).toHexString(),
+    //             32
+    //           ),
+    //         ],
+    //       },
+    //     ],
+    //     id: 1,
+    //   }),
+    // })
+
+    // const json = await res.json()
+
+    // const { result } = logsDTO(json)
+
+    // logger.info('Loaded ValidatorExitRequest events', { amount: result.length })
 
     return validatorsToEject
   }

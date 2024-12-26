@@ -1,1 +1,2 @@
+yarn build
 yarn start

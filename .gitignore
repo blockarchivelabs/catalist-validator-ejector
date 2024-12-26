@@ -2,6 +2,7 @@ node_modules
 .DS_Store
 .env
 /messages
+/messages_bak
 /keystore
 /temp
 /ethdo

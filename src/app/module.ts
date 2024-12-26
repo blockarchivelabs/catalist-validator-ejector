@@ -32,6 +32,7 @@ import { makeMessageReloader } from '../services/message-reloader/message-reload
 import { makeForkVersionResolver } from '../services/fork-version-resolver/service.js'
 
 dotenv.config()
+globalThis.processExitCount = 0
 
 export const makeAppModule = async () => {
   const loggerConfig = makeLoggerConfig({ env: process.env })

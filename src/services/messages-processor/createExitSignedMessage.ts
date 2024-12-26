@@ -57,7 +57,3 @@ const prepareDeps = () => {
 
   return { messagesProcessor, logger: infoLogger, forkVersionResolver }
 }
-
-prepareDeps().messagesProcessor.createExitSignedMessage(
-  '0x8525ba57b77e2812892268603828dfd3b5b69c11e3d86dd52ffb01d12b439aaedf9f6b65a29fcec37c7d42191876e30a'
-)
