@@ -7,6 +7,12 @@ import type { WebhookProcessorService } from '../webhook-caller/service.js'
 import type { MetricsService } from '../prom/service.js'
 import type { MessageStorage } from './message-storage.js'
 import type { MessageReloader } from '../message-reloader/message-reloader.js'
+import {
+  makeRequest,
+  logger as loggerMiddleware,
+  notOkError,
+  abort,
+} from 'lido-nanolib'
 
 export type ExitMessage = {
   message: {
@@ -46,6 +52,19 @@ export const makeJobProcessor = ({
   webhookProcessor: WebhookProcessorService
   metrics: MetricsService
 }) => {
+  const middlewares = [loggerMiddleware(logger), notOkError(), abort(10000)]
+  const request = makeRequest(middlewares)
+
+  const sendValidatorExitRequest = async (validatorPubkey: string) => {
+    return await request(
+      process.env.VALIDATOR_API + '/validator/exit-message/' + validatorPubkey,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      }
+    )
+  }
+
   const handleJob = async ({
     eventsNumber,
     messageStorage,
@@ -74,31 +93,53 @@ export const makeJobProcessor = ({
       toBlock,
     })
 
-    const eventsForEject = await executionApi.logs(fromBlock, toBlock)
+    interface ValidatorEvent {
+      validatorPubkey: string
+      validatorIndex: string
+    }
+
+    const eventsForEject = (await executionApi.logs(
+      fromBlock,
+      toBlock
+    )) as ValidatorEvent[]
 
     logger.info('Handling ejection requests', {
       amount: eventsForEject.length,
     })
 
+    let count = 0
+
     for (const [ix, event] of eventsForEject.entries()) {
-      logger.debug(`Handling exit ${ix + 1}/${eventsForEject.length}`, event)
+      if (globalThis.processExitCount > ix) continue
+
+      logger.info(`Handling exit ${ix + 1}/${eventsForEject.length}`, event)
 
       try {
         if (await consensusApi.isExiting(event.validatorPubkey)) {
+          await sendValidatorExitRequest(event.validatorPubkey)
           logger.info('Validator is already exiting(ed), skipping')
+          globalThis.processExitCount = ix
           continue
         }
 
         if (config.DRY_RUN) {
           logger.info('Not initiating an exit in dry run mode')
+          globalThis.processExitCount = ix
           continue
         }
 
         if (config.VALIDATOR_EXIT_WEBHOOK) {
           await webhookProcessor.send(config.VALIDATOR_EXIT_WEBHOOK, event)
         } else {
-          await messagesProcessor.exit(messageStorage, event)
+          const result = await messagesProcessor.exit(messageStorage, event)
+          if (result) globalThis.processExitCount = ix
+          else {
+            // await sendValidatorExitRequest(event.validatorPubkey)
+            ++count
+          }
         }
+
+        // if (count === 1) break
       } catch (e) {
         logger.error(`Unable to process exit for ${event.validatorPubkey}`, e)
         metrics.exitActions.inc({ result: 'error' })

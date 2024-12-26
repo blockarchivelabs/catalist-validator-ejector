@@ -11,7 +11,7 @@ import { argv, question, $, glob } from 'zx'
 import { readdir, readFile, writeFile } from 'fs/promises'
 import { utils } from 'ethers'
 import { encryptedMessageDTO, exitOrEthDoExitDTO } from './dto.js'
-import type { LoggerService } from 'lido-nanolib'
+
 import type {
   LocalFileReaderService,
   MessageFile,
@@ -22,6 +22,14 @@ import type { S3StoreService } from '../s3-store/service.js'
 import type { GsStoreService } from '../gs-store/service.js'
 import type { MessageStorage } from '../job-processor/message-storage.js'
 import type { ExitMessageWithMetadata } from '../job-processor/service.js'
+import {
+  LoggerService,
+  makeRequest,
+  logger as loggerMiddleware,
+  abort,
+  notOkError,
+  retry,
+} from 'lido-nanolib'
 
 type ExitMessage = {
   message: {
@@ -75,7 +83,7 @@ export const makeMessagesProcessor = ({
     logger.info('Parsing loaded messages')
 
     for (const [ix, messageFile] of folder.entries()) {
-      logger.debug(`${ix + 1}/${folder.length} 11`)
+      logger.info(`Parsing loaded messages - ${ix + 1}/${folder.length}`)
 
       // skipping empty files
       if (messageFile.content === '') {
@@ -91,6 +99,7 @@ export const makeMessagesProcessor = ({
 
       if (messagesStorage.touchMessageWithChecksum(fileChecksum)) {
         logger.info(`File already loaded`)
+
         continue
       }
 
@@ -183,7 +192,7 @@ export const makeMessagesProcessor = ({
     const validMessagesWithMetadata: ExitMessageWithMetadata[] = []
 
     for (const [ix, m] of messages.entries()) {
-      logger.debug(`${ix + 1}/${messages.length}`)
+      logger.info(`Validating messages - ${ix + 1}/${messages.length}`)
 
       const { message, signature: rawSignature } = m.data
       const { validator_index: validatorIndex, epoch } = message
@@ -293,25 +302,25 @@ export const makeMessagesProcessor = ({
         logger.error('[Message Create] Exception', e)
       }
 
-      message = messageStorage.findByValidatorIndex(event.validatorIndex)
+      return false
     }
 
-    if (message) {
-      try {
-        await consensusApi.exitRequest(message)
-        logger.info(
-          'Voluntary exit message sent successfully to Consensus Layer',
-          event
-        )
-        metrics.exitActions.inc({ result: 'success' })
-      } catch (e) {
-        logger.error(
-          'Failed to send out exit message',
-          e instanceof Error ? e.message : e
-        )
-        metrics.exitActions.inc({ result: 'error' })
-      }
+    try {
+      await consensusApi.exitRequest(message)
+      logger.info(
+        'Voluntary exit message sent successfully to Consensus Layer',
+        event
+      )
+      metrics.exitActions.inc({ result: 'success' })
+      await $`mv ${process.env.MESSAGES_LOCATION}/${event.validatorPubkey}.json ${process.env.MESSAGES_LOCATION}_bak`
+    } catch (e) {
+      logger.error(
+        'Failed to send out exit message',
+        e instanceof Error ? e.message : e
+      )
+      metrics.exitActions.inc({ result: 'error' })
     }
+    return true
   }
 
   const createExitSignedMessage = async (validatorPubkey: string) => {
