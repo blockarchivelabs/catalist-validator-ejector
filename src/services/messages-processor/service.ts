@@ -262,6 +262,7 @@ export const makeMessagesProcessor = ({
         isValid = verifyFork(CAPELLA_FORK_VERSION)
       }
 
+      // 2025. 9. 18. Harry, Endurance Pectra 업데이트 이후 Validation 부분 비활성화
       // if (!isValid) {
       //   logger.error(`Invalid signature for validator ${validatorIndex}`)
       //   invalidExitMessageFiles.add(m.meta.filename)
