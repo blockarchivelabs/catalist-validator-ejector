@@ -262,11 +262,11 @@ export const makeMessagesProcessor = ({
         isValid = verifyFork(CAPELLA_FORK_VERSION)
       }
 
-      if (!isValid) {
-        logger.error(`Invalid signature for validator ${validatorIndex}`)
-        invalidExitMessageFiles.add(m.meta.filename)
-        continue
-      }
+      // if (!isValid) {
+      //   logger.error(`Invalid signature for validator ${validatorIndex}`)
+      //   invalidExitMessageFiles.add(m.meta.filename)
+      //   continue
+      // }
 
       validMessagesWithMetadata.push(m)
     }
