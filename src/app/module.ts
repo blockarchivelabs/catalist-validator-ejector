@@ -93,6 +93,7 @@ export const makeAppModule = async () => {
     metrics,
     s3Service,
     gsService,
+    forkVersionResolver,
   })
 
   const webhookConfig = makeWebhookProcessorConfig({ env: process.env })
