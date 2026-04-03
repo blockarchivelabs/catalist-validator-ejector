@@ -34,7 +34,7 @@ const prepareDeps = () => {
   )
 
   const forkVersionResolver = makeForkVersionResolver(consensusApi, logger, {
-    FORCE_DENCUN_FORK_MODE: true,
+    FORCE_DENCUN_FORK_MODE: false,
   })
 
   const localFileReader = makeLocalFileReader({ logger })
@@ -50,6 +50,7 @@ const prepareDeps = () => {
     metrics,
     s3Service,
     gsService,
+    forkVersionResolver,
   })
 
   const infoLogger = makeLogger({
