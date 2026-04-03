@@ -74,12 +74,6 @@ export const prepareDeps = (
     config
   )
 
-  const forkVersionResolver = makeForkVersionResolver(
-    consensusApi,
-    logger,
-    config
-  )
-
   const localFileReader = makeLocalFileReader({ logger })
 
   vi.spyOn(localFileReader, 'readFilesFromFolder').mockImplementation(
@@ -89,6 +83,12 @@ export const prepareDeps = (
   const s3Service = makeS3Store({ logger })
   const gsService = makeGsStore({ logger })
 
+  const forkVersionResolver = makeForkVersionResolver(
+    consensusApi,
+    logger,
+    config
+  )
+
   const messagesProcessor = makeMessagesProcessor({
     logger,
     config,
@@ -97,6 +97,7 @@ export const prepareDeps = (
     metrics,
     s3Service,
     gsService,
+    forkVersionResolver,
   })
 
   const infoLogger = makeLogger({
