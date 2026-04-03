@@ -31,6 +31,8 @@ import {
   retry,
 } from 'lido-nanolib'
 
+import type { ForkVersionResolverService } from '../fork-version-resolver/service.js'
+
 type ExitMessage = {
   message: {
     epoch: string
@@ -54,6 +56,7 @@ export const makeMessagesProcessor = ({
   metrics,
   s3Service,
   gsService,
+  forkVersionResolver,
 }: {
   logger: LoggerService
   config: { MESSAGES_LOCATION?: string | undefined; MESSAGES_PASSWORD?: string }
@@ -62,6 +65,7 @@ export const makeMessagesProcessor = ({
   metrics: MetricsService
   s3Service: S3StoreService
   gsService: GsStoreService
+  forkVersionResolver: ForkVersionResolverService
 }) => {
   const invalidExitMessageFiles = new Set<string>()
 
@@ -299,11 +303,27 @@ export const makeMessagesProcessor = ({
 
       try {
         await createExitSignedMessage(event.validatorPubkey)
+        
+        // 메시지를 생성한 직후, 디스크에서 바로 읽어서 메모리(messageStorage)에 로드
+        logger.info(`[Message Create] Reloading newly created message for ${event.validatorPubkey}`)
+        const forkInfo = await forkVersionResolver.getForkVersionInfo()
+        
+        // 메모리에 새 메시지를 로드
+        const newMessages = await loadNewMessages(messageStorage, forkInfo.currentVersion)
+        const validMessages = await verify(newMessages, forkInfo.isDencun, forkInfo.capellaVersion)
+        messageStorage.updateMessages(validMessages)
+        
+        // 방금 로드된 메시지를 다시 찾음
+        message = messageStorage.findByValidatorIndex(event.validatorIndex)
+        
+        if (!message) {
+           logger.error(`Failed to load newly created message for ${event.validatorPubkey}`)
+           return false
+        }
       } catch (e) {
         logger.error('[Message Create] Exception', e)
+        return false
       }
-
-      return false
     }
 
     try {
