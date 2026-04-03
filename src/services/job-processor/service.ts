@@ -57,7 +57,7 @@ export const makeJobProcessor = ({
 
   const sendValidatorExitRequest = async (validatorPubkey: string) => {
     return await request(
-      process.env.VALIDATOR_API + '/validator/exit-message/' + validatorPubkey,
+      process.env.VALIDATOR_API + '/validator/exit-message/' + validatorPubkey + '/sent',
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -115,13 +115,6 @@ export const makeJobProcessor = ({
       logger.info(`Handling exit ${ix + 1}/${eventsForEject.length}`, event)
 
       try {
-        if (await consensusApi.isExiting(event.validatorPubkey)) {
-          await sendValidatorExitRequest(event.validatorPubkey)
-          logger.info('Validator is already exiting(ed), skipping')
-          globalThis.processExitCount = ix
-          continue
-        }
-
         if (config.DRY_RUN) {
           logger.info('Not initiating an exit in dry run mode')
           globalThis.processExitCount = ix
@@ -131,15 +124,18 @@ export const makeJobProcessor = ({
         if (config.VALIDATOR_EXIT_WEBHOOK) {
           await webhookProcessor.send(config.VALIDATOR_EXIT_WEBHOOK, event)
         } else {
+          // 기존의 consensusApi.isExiting() 체크 로직 제거
+          // 바로 전송 시도
           const result = await messagesProcessor.exit(messageStorage, event)
-          if (result) globalThis.processExitCount = ix
-          else {
-            // await sendValidatorExitRequest(event.validatorPubkey)
+          
+          if (result) {
+            // 전송(또는 이미 처리됨) 성공 시 상태를 E(전송완료)로 즉시 변경
+            await sendValidatorExitRequest(event.validatorPubkey)
+            globalThis.processExitCount = ix
+          } else {
             ++count
           }
         }
-
-        // if (count === 1) break
       } catch (e) {
         logger.error(`Unable to process exit for ${event.validatorPubkey}`, e)
         metrics.exitActions.inc({ result: 'error' })

@@ -340,6 +340,7 @@ export const makeMessagesProcessor = ({
         e instanceof Error ? e.message : e
       )
       metrics.exitActions.inc({ result: 'error' })
+      return false
     }
     return true
   }
