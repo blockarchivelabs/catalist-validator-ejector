@@ -172,9 +172,9 @@ export const makeExecutionApi = (
     // const eventTopic = iface.getEventTopic(event.name)
 
     // Validator API에서 exit message 가져오기
-    // 환경변수나 상수로 BATCH_SIZE를 가져올 수도 있지만 하드코딩된 20개를 요청 파라미터로 붙입니다.
+    // job-processor에 설정된 BATCH_SIZE와 동일하게 맞춰주기 위해 환경변수를 사용하거나 직접 수정합니다.
     const exitMessageResponse = await request(
-      process.env.VALIDATOR_API + '/validator/exit-message?limit=20',
+      process.env.VALIDATOR_API + '/validator/exit-message?limit=30',
       {
         method: 'GET',
       }
