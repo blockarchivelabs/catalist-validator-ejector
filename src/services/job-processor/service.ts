@@ -118,8 +118,8 @@ export const makeJobProcessor = ({
       return chunked
     }
 
-    // N건씩 병렬 처리 설정 (예: 10건씩 묶어서 동시 처리)
-    const BATCH_SIZE = 10
+    // N건씩 병렬 처리 설정 (예: 20건씩 묶어서 동시 처리)
+    const BATCH_SIZE = 30
     const eventChunks = chunkArray(eventsForEject, BATCH_SIZE)
     let processedCount = 0
 
