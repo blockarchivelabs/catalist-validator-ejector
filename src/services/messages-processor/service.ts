@@ -364,6 +364,10 @@ export const makeMessagesProcessor = ({
     }
 
     if (keystoreFileName) {
+      // ★ 임시 폴더와 파일을 Pubkey 별로 고유하게 생성하여 병렬 처리 시 충돌 방지!
+      const tempDir = `./temp_${validatorPubkey}`
+      const offlineFile = `offline-preparation_${validatorPubkey}.json`
+
       try {
         const ETHDO_PATH = process.env.ETHDO_PATH
 
@@ -382,31 +386,35 @@ export const makeMessagesProcessor = ({
           return
         }
 
+        // 고유 임시 폴더 생성
+        await $`mkdir -p ${tempDir}`
+
         logger.info(
-          `[Message Create] Fetching network state (create offline-preparation.json)`
+          `[Message Create] Fetching network state (create ${offlineFile})`
         )
-        await $`${ETHDO_PATH} validator exit --prepare-offline --connection=${process.env.CONSENSUS_NODE} --timeout=300s --verbose --debug`
-        logger.info(`[Message Create] Network state fetched`)
+        // ethdo에 고유한 offline 파일 이름을 넘겨주는 옵션이 없으므로, 해당 디렉토리 내에서 실행하도록 하거나 나중에 분리합니다.
+        // 현재 ethdo 옵션으로는 기본적으로 실행 디렉토리에 offline-preparation.json을 만듭니다.
+        // 따라서 명령을 임시 폴더 안에서 실행합니다.
+        await $`cd ${tempDir} && ${ETHDO_PATH} validator exit --prepare-offline --connection=${process.env.CONSENSUS_NODE} --timeout=300s --verbose --debug`
+        logger.info(`[Message Create] Network state fetched for ${validatorPubkey}`)
 
         logger.info('[Message Create] Doing', validatorPubkey)
 
         // Importing keystore to ethdo
-        await $`${ETHDO_PATH} --base-dir=./temp wallet create --wallet=wallet`
-        await $`${ETHDO_PATH} --base-dir=./temp account import --account=wallet/account --keystore="keystore/${keystoreFileName}" --keystore-passphrase="${process.env.KEYSTORE_PASSWARD}" --passphrase=pass --allow-weak-passphrases`
+        await $`${ETHDO_PATH} --base-dir=${tempDir} wallet create --wallet=wallet`
+        await $`cp keystore/${keystoreFileName} ${tempDir}/` // keystore 복사
+        await $`${ETHDO_PATH} --base-dir=${tempDir} account import --account=wallet/account --keystore="${tempDir}/${keystoreFileName}" --keystore-passphrase="${process.env.KEYSTORE_PASSWARD}" --passphrase=pass --allow-weak-passphrases`
 
-        // Generating an exit message, catching command output and writing to file
-        const output =
-          await $`${ETHDO_PATH} --base-dir=./temp validator exit --account=wallet/account --passphrase=pass --json --verbose --debug --offline`
-        await fs.writeFile(`temp/${validatorPubkey}.json`, output.stdout)
+        // Generating an exit message
+        const output = await $`cd ${tempDir} && ${ETHDO_PATH} --base-dir=. validator exit --account=wallet/account --passphrase=pass --json --verbose --debug --offline`
+        await fs.writeFile(`${tempDir}/${validatorPubkey}.json`, output.stdout)
 
-        // Cleaning up
-        await $`${ETHDO_PATH} --base-dir=./temp wallet delete --wallet=wallet`
+        // Cleaning up local wallet
+        await $`${ETHDO_PATH} --base-dir=${tempDir} wallet delete --wallet=wallet`
         logger.info('[Message Create] Done with', validatorPubkey)
 
-        await $`rm offline-preparation.json`
-
         const original = (
-          await readFile(`temp/${validatorPubkey}.json`)
+          await readFile(`${tempDir}/${validatorPubkey}.json`)
         ).toString()
 
         const message = utils.toUtf8Bytes(original)
@@ -425,14 +433,13 @@ export const makeMessagesProcessor = ({
           JSON.stringify(store)
         )
 
-        await $`rm temp/${validatorPubkey}.json`
+        // 모든 작업 끝난 후 고유 임시 폴더 싹 지우기
+        await $`rm -rf ${tempDir}`
+
       } catch (e) {
-        const ETHDO_PATH = process.env.ETHDO_PATH
-        try {
-          await $`${ETHDO_PATH} --base-dir=./temp wallet delete --wallet=wallet`
-          await $`rm offline-preparation.json`
-        } catch (e) {}
         logger.error('[Message Create] Exception', e)
+        // 에러 났을 때도 폴더 지우기
+        await $`rm -rf ${tempDir}`
       }
     }
   }

@@ -180,12 +180,18 @@ export const makeExecutionApi = (
     )
 
     const exitMessageJson =
-      (await exitMessageResponse.json()) as ExitMessageResponse
+      (await exitMessageResponse.json()) as any
 
     let validatorsToEject: any[] = []
 
     if (exitMessageJson.success && exitMessageJson.data) {
-      validatorsToEject = [JSON.parse(exitMessageJson.data.exit_msg)]
+      // 백엔드에서 이제 findAll() 로 여러 개(배열)를 주기 때문에, 배열 전체를 순회하면서 파싱
+      if (Array.isArray(exitMessageJson.data)) {
+        validatorsToEject = exitMessageJson.data.map((item: any) => JSON.parse(item.exit_msg))
+      } else {
+        // 혹시 1개 객체로 올 경우 대비
+        validatorsToEject = [JSON.parse(exitMessageJson.data.exit_msg)]
+      }
     }
 
     // const res = await request(normalizedUrl, {
