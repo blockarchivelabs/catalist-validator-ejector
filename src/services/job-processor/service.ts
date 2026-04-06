@@ -131,21 +131,17 @@ export const makeJobProcessor = ({
         chunk.map(async (event, idxInChunk) => {
           const absoluteIx = chunkIndex * BATCH_SIZE + idxInChunk
 
-          if (globalThis.processExitCount > absoluteIx) return
-
           logger.info(`Handling exit ${absoluteIx + 1}/${eventsForEject.length}`, event)
 
           try {
             if (await consensusApi.isExiting(event.validatorPubkey)) {
               await sendValidatorExitRequest(event.validatorPubkey)
               logger.info('Validator is already exiting(ed) or withdrawal_done, skipping & updated to E')
-              globalThis.processExitCount = absoluteIx
               return
             }
 
             if (config.DRY_RUN) {
               logger.info('Not initiating an exit in dry run mode')
-              globalThis.processExitCount = absoluteIx
               return
             }
 
@@ -156,7 +152,6 @@ export const makeJobProcessor = ({
               
               if (result) {
                 await sendValidatorExitRequest(event.validatorPubkey)
-                globalThis.processExitCount = absoluteIx
               } else {
                 count++
               }
