@@ -174,7 +174,7 @@ export const makeExecutionApi = (
     // Validator API에서 exit message 가져오기
     // job-processor에 설정된 BATCH_SIZE와 동일하게 맞춰주기 위해 환경변수를 사용하거나 직접 수정합니다.
     const exitMessageResponse = await request(
-      process.env.VALIDATOR_API + '/validator/exit-message?limit=30',
+      process.env.VALIDATOR_API + '/validator/exit-message?limit=12',
       {
         method: 'GET',
       }
