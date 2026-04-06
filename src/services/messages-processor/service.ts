@@ -296,30 +296,21 @@ export const makeMessagesProcessor = ({
     let message = messageStorage.findByValidatorIndex(event.validatorIndex)
 
     if (!message) {
-      logger.error(
-        'Validator needs to be exited but required message was not found / accessible!'
+      logger.info(
+        `Validator needs to be exited but message was not found. Generating a new one for ${event.validatorPubkey}`
       )
-      metrics.exitActions.inc({ result: 'error' })
 
       try {
-        await createExitSignedMessage(event.validatorPubkey)
+        // 메시지를 생성하고 생성된 메시지 객체를 곧바로 반환받음
+        const newlyCreatedMessage = await createExitSignedMessage(event.validatorPubkey)
         
-        // 메시지를 생성한 직후, 디스크에서 바로 읽어서 메모리(messageStorage)에 로드
-        logger.info(`[Message Create] Reloading newly created message for ${event.validatorPubkey}`)
-        const forkInfo = await forkVersionResolver.getForkVersionInfo()
-        
-        // 메모리에 새 메시지를 로드
-        const newMessages = await loadNewMessages(messageStorage, forkInfo.currentVersion)
-        const validMessages = await verify(newMessages, forkInfo.isDencun, forkInfo.capellaVersion)
-        messageStorage.updateMessages(validMessages)
-        
-        // 방금 로드된 메시지를 다시 찾음
-        message = messageStorage.findByValidatorIndex(event.validatorIndex)
-        
-        if (!message) {
-           logger.error(`Failed to load newly created message for ${event.validatorPubkey}`)
+        if (!newlyCreatedMessage) {
+           logger.error(`Failed to generate new exit message for ${event.validatorPubkey}`)
            return false
         }
+        
+        // 반환받은 단일 메시지를 바로 할당하여 전송 준비
+        message = newlyCreatedMessage
       } catch (e) {
         logger.error('[Message Create] Exception', e)
         return false
@@ -333,7 +324,8 @@ export const makeMessagesProcessor = ({
         event
       )
       metrics.exitActions.inc({ result: 'success' })
-      await $`mv ${process.env.MESSAGES_LOCATION}/${event.validatorPubkey}.json ${process.env.MESSAGES_LOCATION}_bak`
+      // 전송 성공 시 백업 폴더로 이동 처리 (이미 백업 폴더가 있는지 체크하는 게 좋지만 $`mv`로 진행)
+      await $`mv ${process.env.MESSAGES_LOCATION}/${event.validatorPubkey}.json ${process.env.MESSAGES_LOCATION}_bak 2>/dev/null || true`
     } catch (e) {
       logger.error(
         'Failed to send out exit message',
@@ -345,7 +337,7 @@ export const makeMessagesProcessor = ({
     return true
   }
 
-  const createExitSignedMessage = async (validatorPubkey: string) => {
+  const createExitSignedMessage = async (validatorPubkey: string): Promise<Readonly<ExitMessage> | null> => {
     const folder = await readFolder('keystore')
     let keystoreFileName: string | null = null
 
@@ -364,87 +356,84 @@ export const makeMessagesProcessor = ({
     }
 
     if (keystoreFileName) {
-      // ★ 임시 폴더와 파일을 Pubkey 별로 고유하게 생성하여 병렬 처리 시 충돌 방지!
       const tempDir = `./temp_${validatorPubkey}`
       const offlineFile = `offline-preparation_${validatorPubkey}.json`
 
       try {
         const ETHDO_PATH = process.env.ETHDO_PATH as string
-        
-        // ETHDO_PATH가 "./"로 시작하는 상대 경로일 경우 "cd tempDir" 안에서 실행할 수 있도록 "../"을 추가해 줌
-        // 절대 경로(예: /usr/bin/ethdo)이거나 명령(ethdo)일 경우에는 그대로 사용
         const resolvedEthdoPath = ETHDO_PATH.startsWith('./') ? `../${ETHDO_PATH}` : ETHDO_PATH
 
         if (!process.env.KEYSTORE_PASSWARD) {
           console.error('Please set encryption password in .env')
-          return
+          return null
         }
 
         if (!process.env.MESSAGES_PASSWORD) {
           console.error('Please set massage password in .env')
-          return
+          return null
         }
 
         if (!process.env.CONSENSUS_NODE) {
           console.error('Please set node url in .env')
-          return
+          return null
         }
 
-        // 고유 임시 폴더 생성
         await $`mkdir -p ${tempDir}`
 
-        logger.info(
-          `[Message Create] Fetching network state (create ${offlineFile})`
-        )
-        
-        // 임시 폴더 안으로 들어가서 실행. 이때 ethdo 경로를 resolvedEthdoPath로 사용
+        logger.info(`[Message Create] Fetching network state (create ${offlineFile})`)
         await $`cd ${tempDir} && ${resolvedEthdoPath} validator exit --prepare-offline --connection=${process.env.CONSENSUS_NODE} --timeout=300s --verbose --debug`
         logger.info(`[Message Create] Network state fetched for ${validatorPubkey}`)
 
-        logger.info('[Message Create] Doing', validatorPubkey)
-
-        // Importing keystore to ethdo (이건 루트에서 하니까 원래 ETHDO_PATH 사용)
         await $`${ETHDO_PATH} --base-dir=${tempDir} wallet create --wallet=wallet`
-        await $`cp keystore/${keystoreFileName} ${tempDir}/` // keystore 복사
+        await $`cp keystore/${keystoreFileName} ${tempDir}/`
         await $`${ETHDO_PATH} --base-dir=${tempDir} account import --account=wallet/account --keystore="${tempDir}/${keystoreFileName}" --keystore-passphrase="${process.env.KEYSTORE_PASSWARD}" --passphrase=pass --allow-weak-passphrases`
 
-        // Generating an exit message (이것도 cd 해서 하니까 resolvedEthdoPath 사용)
         const output = await $`cd ${tempDir} && ${resolvedEthdoPath} --base-dir=. validator exit --account=wallet/account --passphrase=pass --json --verbose --debug --offline`
         await fs.writeFile(`${tempDir}/${validatorPubkey}.json`, output.stdout)
 
-        // Cleaning up local wallet (이건 루트에서 하니까 원래 ETHDO_PATH 사용)
         await $`${ETHDO_PATH} --base-dir=${tempDir} wallet delete --wallet=wallet`
         logger.info('[Message Create] Done with', validatorPubkey)
 
-        const original = (
-          await readFile(`${tempDir}/${validatorPubkey}.json`)
-        ).toString()
+        const original = (await readFile(`${tempDir}/${validatorPubkey}.json`)).toString()
 
-        const message = utils.toUtf8Bytes(original)
-        const pubkey = new Uint8Array()
-        const path = ''
+        // 파일 쓰기 전에 바로 JSON 파싱하여 반환 객체 생성
+        let parsedMessage: ExitMessage | EthDoExitMessage
+        try {
+          parsedMessage = exitOrEthDoExitDTO(JSON.parse(original))
+        } catch (e) {
+          logger.error(`Failed validation for generated message for ${validatorPubkey}`, e)
+          await $`rm -rf ${tempDir}`
+          return null
+        }
 
-        const store = await create(
-          process.env.MESSAGES_PASSWORD,
-          message,
-          pubkey,
-          path
-        )
+        const messageData = 'exit' in parsedMessage ? parsedMessage.exit : parsedMessage
+        
+        // 메모리에 굳이 안 담아도 되게 메타데이터와 함께 리턴
+        const forkInfo = await forkVersionResolver.getForkVersionInfo()
+        const resultObject = messageData
+
+        // 혹시 나중에 데몬이 뻗었다가 다시 켜질 때를 대비해서(혹은 백업용) messages 폴더에 저장
+        const messageBytes = utils.toUtf8Bytes(original)
+        const pubkeyBytes = new Uint8Array()
+        const store = await create(process.env.MESSAGES_PASSWORD, messageBytes, pubkeyBytes, '')
 
         await writeFile(
           `${process.env.MESSAGES_LOCATION}/${validatorPubkey}.json`,
           JSON.stringify(store)
         )
 
-        // 모든 작업 끝난 후 고유 임시 폴더 싹 지우기
+        // 임시 폴더 삭제
         await $`rm -rf ${tempDir}`
+
+        return resultObject
 
       } catch (e) {
         logger.error('[Message Create] Exception', e)
-        // 에러 났을 때도 폴더 지우기
         await $`rm -rf ${tempDir}`
+        return null
       }
     }
+    return null
   }
 
   const loadToMemoryStorage = async (
