@@ -369,7 +369,11 @@ export const makeMessagesProcessor = ({
       const offlineFile = `offline-preparation_${validatorPubkey}.json`
 
       try {
-        const ETHDO_PATH = process.env.ETHDO_PATH
+        const ETHDO_PATH = process.env.ETHDO_PATH as string
+        
+        // ETHDO_PATH가 "./"로 시작하는 상대 경로일 경우 "cd tempDir" 안에서 실행할 수 있도록 "../"을 추가해 줌
+        // 절대 경로(예: /usr/bin/ethdo)이거나 명령(ethdo)일 경우에는 그대로 사용
+        const resolvedEthdoPath = ETHDO_PATH.startsWith('./') ? `../${ETHDO_PATH}` : ETHDO_PATH
 
         if (!process.env.KEYSTORE_PASSWARD) {
           console.error('Please set encryption password in .env')
@@ -392,24 +396,23 @@ export const makeMessagesProcessor = ({
         logger.info(
           `[Message Create] Fetching network state (create ${offlineFile})`
         )
-        // ethdo에 고유한 offline 파일 이름을 넘겨주는 옵션이 없으므로, 해당 디렉토리 내에서 실행하도록 하거나 나중에 분리합니다.
-        // 현재 ethdo 옵션으로는 기본적으로 실행 디렉토리에 offline-preparation.json을 만듭니다.
-        // 따라서 명령을 임시 폴더 안에서 실행합니다.
-        await $`cd ${tempDir} && ${ETHDO_PATH} validator exit --prepare-offline --connection=${process.env.CONSENSUS_NODE} --timeout=300s --verbose --debug`
+        
+        // 임시 폴더 안으로 들어가서 실행. 이때 ethdo 경로를 resolvedEthdoPath로 사용
+        await $`cd ${tempDir} && ${resolvedEthdoPath} validator exit --prepare-offline --connection=${process.env.CONSENSUS_NODE} --timeout=300s --verbose --debug`
         logger.info(`[Message Create] Network state fetched for ${validatorPubkey}`)
 
         logger.info('[Message Create] Doing', validatorPubkey)
 
-        // Importing keystore to ethdo
+        // Importing keystore to ethdo (이건 루트에서 하니까 원래 ETHDO_PATH 사용)
         await $`${ETHDO_PATH} --base-dir=${tempDir} wallet create --wallet=wallet`
         await $`cp keystore/${keystoreFileName} ${tempDir}/` // keystore 복사
         await $`${ETHDO_PATH} --base-dir=${tempDir} account import --account=wallet/account --keystore="${tempDir}/${keystoreFileName}" --keystore-passphrase="${process.env.KEYSTORE_PASSWARD}" --passphrase=pass --allow-weak-passphrases`
 
-        // Generating an exit message
-        const output = await $`cd ${tempDir} && ${ETHDO_PATH} --base-dir=. validator exit --account=wallet/account --passphrase=pass --json --verbose --debug --offline`
+        // Generating an exit message (이것도 cd 해서 하니까 resolvedEthdoPath 사용)
+        const output = await $`cd ${tempDir} && ${resolvedEthdoPath} --base-dir=. validator exit --account=wallet/account --passphrase=pass --json --verbose --debug --offline`
         await fs.writeFile(`${tempDir}/${validatorPubkey}.json`, output.stdout)
 
-        // Cleaning up local wallet
+        // Cleaning up local wallet (이건 루트에서 하니까 원래 ETHDO_PATH 사용)
         await $`${ETHDO_PATH} --base-dir=${tempDir} wallet delete --wallet=wallet`
         logger.info('[Message Create] Done with', validatorPubkey)
 
